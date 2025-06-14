@@ -24,10 +24,6 @@ import pinecone
 from pinecone import Pinecone, ServerlessSpec
 import numpy as np
 
-# Load environment variables
-from dotenv import load_dotenv
-load_dotenv()
-
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -640,49 +636,23 @@ def main():
     st.markdown("*Powered by Pinecone Vector Database & Embeddings*")
     st.markdown("---")
     
-    # Get default API keys from environment
-    default_openrouter_key = os.getenv("OPENROUTER_API_KEY")
-    default_pinecone_key = os.getenv("PINECONE_API_KEY")
-    
     # Sidebar for configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
         
         # API Keys input
         st.subheader("🔑 API Keys")
-        
-        # Use default keys toggle
-        use_default_keys = st.checkbox(
-            "🔧 Use Default Keys", 
-            value=bool(default_openrouter_key and default_pinecone_key),
-            help="Use API keys from environment variables (.env file)"
+        openrouter_api_key = st.text_input(
+            "OpenRouter API Key",
+            type="password",
+            help="Get your API key from https://openrouter.ai/"
         )
         
-        if use_default_keys and default_openrouter_key and default_pinecone_key:
-            st.success("✅ Using default API keys from environment")
-            openrouter_api_key = default_openrouter_key
-            pinecone_api_key = default_pinecone_key
-            
-            # Show masked keys for verification
-            st.text(f"OpenRouter: {default_openrouter_key[:8]}...{default_openrouter_key[-4:]}")
-            st.text(f"Pinecone: {default_pinecone_key[:8]}...{default_pinecone_key[-4:]}")
-        else:
-            if use_default_keys:
-                st.warning("⚠️ Default keys not found in environment. Please provide keys manually.")
-            
-            openrouter_api_key = st.text_input(
-                "OpenRouter API Key",
-                type="password",
-                value=default_openrouter_key if default_openrouter_key else "",
-                help="Get your API key from https://openrouter.ai/"
-            )
-            
-            pinecone_api_key = st.text_input(
-                "Pinecone API Key",
-                type="password",
-                value=default_pinecone_key if default_pinecone_key else "",
-                help="Get your API key from https://pinecone.io/"
-            )
+        pinecone_api_key = st.text_input(
+            "Pinecone API Key",
+            type="password",
+            help="Get your API key from https://pinecone.io/"
+        )
         
         # Model selection
         model = st.selectbox(
@@ -698,83 +668,37 @@ def main():
         st.markdown("---")
         st.header("📚 Document Sources")
         
-        # Check existing index status if we have API key
-        existing_docs_count = 0
-        if pinecone_api_key:
-            try:
-                temp_vector_store = PineconeVectorStore(pinecone_api_key)
-                stats = temp_vector_store.get_index_stats()
-                existing_docs_count = stats.get('total_vectors', 0)
-                
-                if existing_docs_count > 0:
-                    st.info(f"📊 Found {existing_docs_count} existing documents in vector database")
-                    
-                    # Option to use existing index or re-index
-                    index_option = st.radio(
-                        "Index Options",
-                        ["Use Existing Index", "Re-index Documents"],
-                        help="Choose whether to use existing documents or load new ones"
-                    )
-                    
-                    if index_option == "Use Existing Index":
-                        st.success("✅ Using existing indexed documents")
-                        # Set flag to skip document loading
-                        st.session_state.use_existing_index = True
-                        st.session_state.docs_loaded = True
-                        st.session_state.doc_count = existing_docs_count
-                    else:
-                        st.warning("⚠️ Will re-index documents (this will replace existing ones)")
-                        st.session_state.use_existing_index = False
-                else:
-                    st.info("📝 No existing documents found. Ready to index new documents.")
-                    st.session_state.use_existing_index = False
-                    
-            except Exception as e:
-                logger.warning(f"Could not check existing index: {e}")
-                st.warning("⚠️ Could not check existing index status")
-                st.session_state.use_existing_index = False
+        # Website URL
+        website_url = st.text_input(
+            "Website URL",
+            value="https://www.angelone.in/support",
+            help="Base URL to scrape for support documentation"
+        )
         
-        # Only show document loading options if not using existing index
-        if not st.session_state.get('use_existing_index', False):
-            # Website URL
-            website_url = st.text_input(
-                "Website URL",
-                value="https://www.angelone.in/support",
-                help="Base URL to scrape for support documentation"
-            )
-            
-            max_pages = st.slider("Max pages to scrape", 5, 100, 20)
-            
-            # File uploads
-            uploaded_files = st.file_uploader(
-                "Upload Documents",
-                type=['pdf', 'docx'],
-                accept_multiple_files=True,
-                help="Upload PDF or DOCX files containing support documentation"
-            )
-            
-            # Load documents button
-            load_docs = st.button("🔄 Load Documents", type="primary")
-        else:
-            st.markdown("*Using existing indexed documents*")
-            load_docs = False
+        max_pages = st.slider("Max pages to scrape", 5, 100, 20)
+        
+        # File uploads
+        uploaded_files = st.file_uploader(
+            "Upload Documents",
+            type=['pdf', 'docx'],
+            accept_multiple_files=True,
+            help="Upload PDF or DOCX files containing support documentation"
+        )
+        
+        # Load documents button
+        load_docs = st.button("🔄 Load Documents", type="primary")
     
     # Check API keys
     if not openrouter_api_key or not pinecone_api_key:
         st.warning("⚠️ Please enter both OpenRouter and Pinecone API keys in the sidebar to continue.")
-        
-        # Show different messages based on whether default keys are available
-        if default_openrouter_key and default_pinecone_key:
-            st.info("💡 **Quick Start:** Enable 'Use Default Keys' in the sidebar to get started immediately!")
-        else:
-            st.info("📖 **Getting Started:**")
-            st.markdown("""
-            1. **OpenRouter API Key**: Sign up at [https://openrouter.ai/](https://openrouter.ai/)
-            2. **Pinecone API Key**: Sign up at [https://pinecone.io/](https://pinecone.io/)
-            3. Enter both keys in the sidebar (or add them to .env file)
-            4. Load your support documents
-            5. Start chatting!
-            """)
+        st.info("📖 **Getting Started:**")
+        st.markdown("""
+        1. **OpenRouter API Key**: Sign up at [https://openrouter.ai/](https://openrouter.ai/)
+        2. **Pinecone API Key**: Sign up at [https://pinecone.io/](https://pinecone.io/)
+        3. Enter both keys in the sidebar
+        4. Load your support documents
+        5. Start chatting!
+        """)
         st.stop()
     
     # Initialize chatbot
@@ -783,11 +707,6 @@ def main():
             with st.spinner("Initializing Pinecone connection..."):
                 st.session_state.chatbot = RAGChatbot(openrouter_api_key, pinecone_api_key, model)
             st.success("✅ Connected to Pinecone!")
-            
-            # If using existing index, show the count
-            if st.session_state.get('use_existing_index', False):
-                st.success(f"✅ Using existing index with {existing_docs_count} documents!")
-                
         except Exception as e:
             st.error(f"❌ Error initializing Pinecone: {e}")
             st.stop()
@@ -797,8 +716,8 @@ def main():
         st.session_state.chatbot.model = model
         st.session_state.chatbot.openrouter_api_key = openrouter_api_key
     
-    # Load documents (only if not using existing index)
-    if load_docs and not st.session_state.get('use_existing_index', False):
+    # Load documents
+    if load_docs:
         sources = {
             "website": website_url if website_url else None,
             "max_pages": max_pages,
@@ -806,18 +725,11 @@ def main():
         }
         
         if sources["website"] or sources["files"]:
-            # Show warning if re-indexing
-            if existing_docs_count > 0:
-                st.warning(f"⚠️ Re-indexing will replace {existing_docs_count} existing documents!")
-                if not st.button("⚠️ Confirm Re-indexing", type="secondary"):
-                    st.stop()
-            
             with st.spinner("Loading and processing documents..."):
                 try:
                     doc_count = st.session_state.chatbot.load_documents(sources)
                     st.session_state.docs_loaded = True
                     st.session_state.doc_count = doc_count
-                    st.session_state.use_existing_index = False
                 except Exception as e:
                     st.error(f"Error loading documents: {e}")
         else:
@@ -829,14 +741,11 @@ def main():
     with col1:
         st.header("💬 Chat Interface")
         
-        # Check if documents are loaded or using existing index
-        if not st.session_state.get('docs_loaded', False):
+        # Check if documents are loaded
+        if 'docs_loaded' not in st.session_state:
             st.info("👆 Please load your support documents using the sidebar first.")
         else:
-            if st.session_state.get('use_existing_index', False):
-                st.success(f"✅ Using existing index with {st.session_state.doc_count} document chunks!")
-            else:
-                st.success(f"✅ {st.session_state.doc_count} document chunks loaded and ready!")
+            st.success(f"✅ {st.session_state.doc_count} document chunks loaded and ready!")
             
             # Initialize chat history
             if 'messages' not in st.session_state:
@@ -879,13 +788,6 @@ def main():
     with col2:
         st.header("📊 System Info")
         
-        # API Keys status
-        st.subheader("🔑 API Status")
-        if use_default_keys:
-            st.success("✅ Using Default Keys")
-        else:
-            st.info("🔧 Using Custom Keys")
-        
         # Pinecone stats
         if 'chatbot' in st.session_state:
             try:
@@ -894,42 +796,14 @@ def main():
                     st.metric("Vectors in Pinecone", stats.get('total_vectors', 0))
                     st.metric("Vector Dimension", stats.get('dimension', 0))
                     st.metric("Index Fullness", f"{stats.get('index_fullness', 0)*100:.1f}%")
-                    
-                    # Show index status
-                    if st.session_state.get('use_existing_index', False):
-                        st.success("📊 Using Existing Index")
-                    else:
-                        st.info("🆕 Newly Indexed")
-                        
                 else:
                     st.error(f"Stats error: {stats['error']}")
             except Exception as e:
                 st.error(f"Error fetching stats: {e}")
         
-        if st.session_state.get('docs_loaded', False):
+        if 'docs_loaded' in st.session_state:
             st.metric("Documents Loaded", st.session_state.doc_count)
             st.metric("Chat Messages", len(st.session_state.messages) if 'messages' in st.session_state else 0)
-        
-        # Clear index button
-        if st.session_state.get('docs_loaded', False):
-            st.markdown("---")
-            st.subheader("🗑️ Index Management")
-            if st.button("🗑️ Clear Index", type="secondary", help="Remove all documents from vector database"):
-                try:
-                    if 'chatbot' in st.session_state:
-                        # Clear the index by deleting all vectors
-                        st.session_state.chatbot.vector_store.index.delete(delete_all=True)
-                        st.success("✅ Index cleared successfully!")
-                        
-                        # Reset session state
-                        st.session_state.docs_loaded = False
-                        st.session_state.use_existing_index = False
-                        if 'doc_count' in st.session_state:
-                            del st.session_state.doc_count
-                        
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Error clearing index: {e}")
         
         st.markdown("---")
         st.header("🌲 Pinecone Features")
