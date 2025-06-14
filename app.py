@@ -25,7 +25,14 @@ from pinecone import Pinecone, ServerlessSpec
 import numpy as np
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    # handlers=[
+    #     logging.StreamHandler(),
+    #     logging.FileHandler('rag_chatbot.log')
+    # ]
+)
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -43,18 +50,26 @@ class DocumentProcessor:
     def __init__(self):
         self.chunk_size = 500
         self.chunk_overlap = 50
+        logger.info(f"DocumentProcessor initialized with chunk_size={self.chunk_size}, chunk_overlap={self.chunk_overlap}")
     
     def process_pdf(self, file_path: str) -> List[Document]:
         """Process PDF files"""
         documents = []
+        logger.info(f"Starting PDF processing for: {file_path}")
         try:
             with open(file_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
+                logger.info(f"PDF has {len(pdf_reader.pages)} pages")
                 full_text = ""
-                for page in pdf_reader.pages:
-                    full_text += page.extract_text() + "\n"
+                for page_num, page in enumerate(pdf_reader.pages):
+                    page_text = page.extract_text()
+                    full_text += page_text + "\n"
+                    logger.debug(f"Extracted {len(page_text)} characters from page {page_num + 1}")
                 
+                logger.info(f"Total text extracted: {len(full_text)} characters")
                 chunks = self._chunk_text(full_text)
+                logger.info(f"Created {len(chunks)} chunks from PDF")
+                
                 for i, chunk in enumerate(chunks):
                     doc = Document(
                         content=chunk,
@@ -64,21 +79,31 @@ class DocumentProcessor:
                         metadata={"type": "pdf", "page_count": len(pdf_reader.pages)}
                     )
                     documents.append(doc)
+                    logger.debug(f"Created document chunk {i+1}: {len(chunk)} characters")
+                
+                logger.info(f"Successfully processed PDF: {len(documents)} documents created")
         except Exception as e:
-            logger.error(f"Error processing PDF {file_path}: {e}")
+            logger.error(f"Error processing PDF {file_path}: {e}", exc_info=True)
         
         return documents
     
     def process_docx(self, file_path: str) -> List[Document]:
         """Process DOCX files"""
         documents = []
+        logger.info(f"Starting DOCX processing for: {file_path}")
         try:
             doc = docx.Document(file_path)
+            logger.info(f"DOCX has {len(doc.paragraphs)} paragraphs")
             full_text = ""
-            for paragraph in doc.paragraphs:
-                full_text += paragraph.text + "\n"
+            for para_num, paragraph in enumerate(doc.paragraphs):
+                para_text = paragraph.text
+                full_text += para_text + "\n"
+                logger.debug(f"Paragraph {para_num + 1}: {len(para_text)} characters")
             
+            logger.info(f"Total text extracted: {len(full_text)} characters")
             chunks = self._chunk_text(full_text)
+            logger.info(f"Created {len(chunks)} chunks from DOCX")
+            
             for i, chunk in enumerate(chunks):
                 document = Document(
                     content=chunk,
@@ -88,8 +113,11 @@ class DocumentProcessor:
                     metadata={"type": "docx"}
                 )
                 documents.append(document)
+                logger.debug(f"Created document chunk {i+1}: {len(chunk)} characters")
+            
+            logger.info(f"Successfully processed DOCX: {len(documents)} documents created")
         except Exception as e:
-            logger.error(f"Error processing DOCX {file_path}: {e}")
+            logger.error(f"Error processing DOCX {file_path}: {e}", exc_info=True)
         
         return documents
     
@@ -98,6 +126,8 @@ class DocumentProcessor:
         documents = []
         visited_urls = set()
         urls_to_visit = [base_url]
+        
+        logger.info(f"Starting website scraping for: {base_url}, max_pages: {max_pages}")
         
         session = requests.Session()
         session.headers.update({
@@ -109,8 +139,12 @@ class DocumentProcessor:
             if url in visited_urls:
                 continue
             
+            logger.info(f"Processing URL {len(visited_urls) + 1}/{max_pages}: {url}")
+            
             try:
                 response = session.get(url, timeout=10)
+                logger.debug(f"HTTP response: {response.status_code} for {url}")
+                
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.content, 'html.parser')
                     
@@ -121,8 +155,12 @@ class DocumentProcessor:
                     text = soup.get_text()
                     text = re.sub(r'\s+', ' ', text).strip()
                     
+                    logger.debug(f"Extracted {len(text)} characters from {url}")
+                    
                     if len(text) > 100:  # Only process pages with substantial content
                         chunks = self._chunk_text(text)
+                        logger.info(f"Created {len(chunks)} chunks from {url}")
+                        
                         for i, chunk in enumerate(chunks):
                             doc = Document(
                                 content=chunk,
@@ -132,10 +170,14 @@ class DocumentProcessor:
                                 metadata={"type": "website", "url": url}
                             )
                             documents.append(doc)
+                            logger.debug(f"Created web chunk {i+1}: {len(chunk)} characters")
+                    else:
+                        logger.warning(f"Skipping {url}: insufficient content ({len(text)} characters)")
                     
                     # Find more URLs to scrape (only within same domain)
                     if len(visited_urls) < max_pages:
                         links = soup.find_all('a', href=True)
+                        new_urls_found = 0
                         for link in links[:10]:  # Limit links per page
                             href = link['href']
                             full_url = urljoin(url, href)
@@ -143,6 +185,10 @@ class DocumentProcessor:
                                 full_url not in visited_urls and 
                                 full_url not in urls_to_visit):
                                 urls_to_visit.append(full_url)
+                                new_urls_found += 1
+                        logger.debug(f"Found {new_urls_found} new URLs from {url}")
+                else:
+                    logger.warning(f"HTTP {response.status_code} for {url}")
                 
                 visited_urls.add(url)
                 time.sleep(1)  # Be respectful to the server
@@ -151,6 +197,7 @@ class DocumentProcessor:
                 logger.error(f"Error processing URL {url}: {e}")
                 visited_urls.add(url)
         
+        logger.info(f"Website scraping completed: {len(documents)} total documents from {len(visited_urls)} pages")
         return documents
     
     def _chunk_text(self, text: str) -> List[str]:
@@ -158,32 +205,41 @@ class DocumentProcessor:
         words = text.split()
         chunks = []
         
+        logger.debug(f"Chunking text with {len(words)} words")
+        
         for i in range(0, len(words), self.chunk_size - self.chunk_overlap):
             chunk_words = words[i:i + self.chunk_size]
             chunk = ' '.join(chunk_words)
             if len(chunk.strip()) > 50:  # Only keep substantial chunks
                 chunks.append(chunk.strip())
         
+        logger.debug(f"Created {len(chunks)} chunks")
         return chunks
 
 class PineconeVectorStore:
     """Pinecone vector database manager with Pinecone embeddings"""
     
     def __init__(self, api_key: str, index_name: str = "support-docs"):
+        logger.info(f"Initializing PineconeVectorStore with index: {index_name}")
         self.pc = Pinecone(api_key=api_key)
         self.index_name = index_name
         self.embedding_model = "multilingual-e5-large"
         self.dimension = 1024  # multilingual-e5-large dimension
+        self.embedding_batch_size = 50  # Reduced from 100 to stay under 96 limit
         self.index = None
+        logger.info(f"Using embedding model: {self.embedding_model}, dimension: {self.dimension}")
         self._setup_index()
     
     def _setup_index(self):
         """Setup Pinecone index"""
         try:
+            logger.info("Setting up Pinecone index...")
             # Check if index exists
             existing_indexes = [index.name for index in self.pc.list_indexes()]
+            logger.info(f"Existing indexes: {existing_indexes}")
             
             if self.index_name not in existing_indexes:
+                logger.info(f"Creating new Pinecone index: {self.index_name}")
                 # Create new index
                 self.pc.create_index(
                     name=self.index_name,
@@ -196,26 +252,95 @@ class PineconeVectorStore:
                 )
                 logger.info(f"Created new Pinecone index: {self.index_name}")
                 time.sleep(10)  # Wait for index to be ready
+            else:
+                logger.info(f"Index {self.index_name} already exists")
             
             # Connect to index
             self.index = self.pc.Index(self.index_name)
             logger.info(f"Connected to Pinecone index: {self.index_name}")
             
         except Exception as e:
-            logger.error(f"Error setting up Pinecone index: {e}")
+            logger.error(f"Error setting up Pinecone index: {e}", exc_info=True)
             raise
     
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings using Pinecone's embedding service"""
+        """Generate embeddings using Pinecone's embedding service with proper batching"""
+        logger.info(f"Generating embeddings for {len(texts)} texts")
         try:
-            response = self.pc.inference.embed(
-                model=self.embedding_model,
-                inputs=texts,
-                parameters={"input_type": "passage", "truncate": "END"}
-            )
-            return [embedding['values'] for embedding in response['data']]
+            all_embeddings = []
+            
+            # Much smaller batch size to avoid rate limits
+            actual_batch_size = min(50, self.embedding_batch_size)
+            logger.info(f"Using batch size: {actual_batch_size}")
+            
+            # Process in smaller batches to respect API limits
+            for i in range(0, len(texts), actual_batch_size):
+                batch_texts = texts[i:i + actual_batch_size]
+                batch_num = i // actual_batch_size + 1
+                total_batches = (len(texts) - 1) // actual_batch_size + 1
+                
+                logger.info(f"Processing embedding batch {batch_num}/{total_batches} ({len(batch_texts)} texts)")
+                
+                # Add retry logic for rate limiting
+                max_retries = 3
+                retry_delay = 5  # Start with longer delay
+                
+                for attempt in range(max_retries):
+                    try:
+                        logger.debug(f"Embedding attempt {attempt + 1} for batch {batch_num}")
+                        response = self.pc.inference.embed(
+                            model=self.embedding_model,
+                            inputs=batch_texts,
+                            parameters={"input_type": "passage", "truncate": "END"}
+                        )
+                        
+                        # Fix: Handle EmbeddingsList response format
+                        if hasattr(response, 'data') and response.data:
+                            # Extract embeddings from EmbeddingsList.data
+                            batch_embeddings = [embedding.values for embedding in response.data]
+                            logger.debug(f"Successfully generated {len(batch_embeddings)} embeddings")
+                        else:
+                            # Fallback for unexpected response format
+                            logger.error(f"Unexpected response format: {type(response)}")
+                            batch_embeddings = [[0.0] * self.dimension for _ in batch_texts]
+                        
+                        all_embeddings.extend(batch_embeddings)
+                        
+                        # Longer delay between batches to respect rate limits
+                        if i + actual_batch_size < len(texts):
+                            logger.debug(f"Waiting 2 seconds before next batch...")
+                            time.sleep(2)  # Increased delay
+                        break
+                        
+                    except Exception as e:
+                        error_str = str(e)
+                        if "429" in error_str or "rate limit" in error_str.lower():
+                            # Rate limit hit - use exponential backoff
+                            if attempt < max_retries - 1:
+                                logger.warning(f"Rate limit hit, retrying in {retry_delay}s (attempt {attempt + 1})")
+                                time.sleep(retry_delay)
+                                retry_delay *= 2  # Exponential backoff
+                            else:
+                                logger.error(f"Rate limit exceeded after {max_retries} attempts")
+                                # Return dummy embeddings for failed batch
+                                dummy_embeddings = [[0.0] * self.dimension for _ in batch_texts]
+                                all_embeddings.extend(dummy_embeddings)
+                        else:
+                            if attempt < max_retries - 1:
+                                logger.warning(f"Embedding attempt {attempt + 1} failed, retrying in {retry_delay}s: {e}")
+                                time.sleep(retry_delay)
+                                retry_delay *= 2
+                            else:
+                                logger.error(f"Failed to generate embeddings after {max_retries} attempts: {e}")
+                                # Return dummy embeddings for failed batch
+                                dummy_embeddings = [[0.0] * self.dimension for _ in batch_texts]
+                                all_embeddings.extend(dummy_embeddings)
+            
+            logger.info(f"Successfully generated {len(all_embeddings)} embeddings")
+            return all_embeddings
+            
         except Exception as e:
-            logger.error(f"Error generating embeddings: {e}")
+            logger.error(f"Error generating embeddings: {e}", exc_info=True)
             # Fallback to dummy embeddings for testing
             return [[0.0] * self.dimension for _ in texts]
     
@@ -225,48 +350,52 @@ class PineconeVectorStore:
             logger.error("Pinecone index not initialized")
             return
         
+        logger.info(f"Adding {len(documents)} documents to Pinecone")
+        
         # Prepare texts for embedding
         texts = [doc.content for doc in documents]
         
-        # Generate embeddings in batches
-        batch_size = 100
-        vectors_to_upsert = []
+        # Generate embeddings with proper batching
+        st.info(f"Generating embeddings for {len(texts)} documents in batches of {self.embedding_batch_size}...")
+        embeddings = self._get_embeddings(texts)
         
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i:i + batch_size]
-            batch_docs = documents[i:i + batch_size]
-            
-            # Get embeddings for this batch
-            embeddings = self._get_embeddings(batch_texts)
-            
-            # Prepare vectors for upsert
-            for doc, embedding in zip(batch_docs, embeddings):
-                vector_id = str(uuid.uuid4())  # Generate unique ID
-                vector = {
-                    "id": vector_id,
-                    "values": embedding,
-                    "metadata": {
-                        "content": doc.content,
-                        "source": doc.source,
-                        "title": doc.title,
-                        "chunk_id": doc.chunk_id,
-                        "doc_type": doc.metadata.get("type", "unknown"),
-                        "url": doc.metadata.get("url", ""),
-                    }
+        # Prepare vectors for upsert
+        vectors_to_upsert = []
+        for doc, embedding in zip(documents, embeddings):
+            vector_id = str(uuid.uuid4())  # Generate unique ID
+            vector = {
+                "id": vector_id,
+                "values": embedding,
+                "metadata": {
+                    "content": doc.content,
+                    "source": doc.source,
+                    "title": doc.title,
+                    "chunk_id": doc.chunk_id,
+                    "doc_type": doc.metadata.get("type", "unknown"),
+                    "url": doc.metadata.get("url", ""),
                 }
-                vectors_to_upsert.append(vector)
+            }
+            vectors_to_upsert.append(vector)
+        
+        logger.info(f"Prepared {len(vectors_to_upsert)} vectors for upsert")
         
         # Upsert vectors in batches
         upsert_batch_size = 100
+        total_batches = (len(vectors_to_upsert) - 1) // upsert_batch_size + 1
+        
         for i in range(0, len(vectors_to_upsert), upsert_batch_size):
             batch = vectors_to_upsert[i:i + upsert_batch_size]
+            batch_num = i // upsert_batch_size + 1
+            
             try:
+                logger.info(f"Upserting batch {batch_num}/{total_batches} ({len(batch)} vectors)")
                 self.index.upsert(vectors=batch)
-                logger.info(f"Upserted batch {i//upsert_batch_size + 1}")
+                logger.info(f"Successfully upserted batch {batch_num}")
+                st.info(f"Uploaded batch {batch_num} of {total_batches}")
             except Exception as e:
-                logger.error(f"Error upserting batch: {e}")
+                logger.error(f"Error upserting batch {batch_num}: {e}", exc_info=True)
         
-        logger.info(f"Added {len(documents)} documents to Pinecone")
+        logger.info(f"Successfully added {len(documents)} documents to Pinecone")
     
     def search(self, query: str, limit: int = 5) -> List[Dict]:
         """Search for relevant documents"""
@@ -274,11 +403,15 @@ class PineconeVectorStore:
             logger.error("Pinecone index not initialized")
             return []
         
+        logger.info(f"Searching Pinecone for query: '{query[:50]}...' (limit: {limit})")
+        
         try:
             # Generate query embedding
+            logger.debug("Generating query embedding...")
             query_embedding = self._get_embeddings([query])[0]
             
             # Search in Pinecone
+            logger.debug("Performing vector search...")
             search_result = self.index.query(
                 vector=query_embedding,
                 top_k=limit,
@@ -288,70 +421,88 @@ class PineconeVectorStore:
             
             results = []
             for match in search_result['matches']:
-                if match['score'] >= 0.3:  # Minimum similarity threshold
+                score = match['score']
+                logger.debug(f"Match found with score: {score}")
+                
+                if score >= 0.3:  # Minimum similarity threshold
                     results.append({
                         "content": match['metadata']['content'],
                         "source": match['metadata']['source'],
                         "title": match['metadata']['title'],
-                        "score": match['score'],
+                        "score": score,
                         "metadata": {
                             "type": match['metadata']['doc_type'],
                             "url": match['metadata'].get('url', ''),
                             "chunk_id": match['metadata']['chunk_id']
                         }
                     })
+                else:
+                    logger.debug(f"Match below threshold ({score} < 0.3), skipping")
             
+            logger.info(f"Found {len(results)} relevant matches above threshold")
             return results
             
         except Exception as e:
-            logger.error(f"Error searching Pinecone: {e}")
+            logger.error(f"Error searching Pinecone: {e}", exc_info=True)
             return []
     
     def get_index_stats(self) -> Dict:
         """Get index statistics"""
         if not self.index:
+            logger.warning("Index not initialized for stats retrieval")
             return {"error": "Index not initialized"}
         
         try:
+            logger.debug("Fetching index statistics...")
             stats = self.index.describe_index_stats()
-            return {
+            result = {
                 "total_vectors": stats.get('total_vector_count', 0),
                 "dimension": stats.get('dimension', 0),
                 "index_fullness": stats.get('index_fullness', 0)
             }
+            logger.info(f"Index stats: {result}")
+            return result
         except Exception as e:
-            logger.error(f"Error getting index stats: {e}")
+            logger.error(f"Error getting index stats: {e}", exc_info=True)
             return {"error": str(e)}
 
 class RAGChatbot:
     """Main RAG chatbot class with Pinecone integration"""
     
     def __init__(self, openrouter_api_key: str, pinecone_api_key: str, model: str = "anthropic/claude-3-haiku"):
+        logger.info(f"Initializing RAGChatbot with model: {model}")
         self.openrouter_api_key = openrouter_api_key
         self.pinecone_api_key = pinecone_api_key
         self.model = model
         self.vector_store = PineconeVectorStore(pinecone_api_key)
         self.doc_processor = DocumentProcessor()
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+        logger.info("RAGChatbot initialization completed")
     
     def load_documents(self, sources: Dict[str, Any]):
         """Load documents from various sources"""
+        logger.info(f"Loading documents from sources: {list(sources.keys())}")
         all_documents = []
         
         # Process website
         if "website" in sources and sources["website"]:
             st.info("🌐 Scraping website content...")
+            logger.info(f"Processing website: {sources['website']}")
             website_docs = self.doc_processor.process_website(
                 sources["website"], 
                 max_pages=sources.get("max_pages", 20)
             )
             all_documents.extend(website_docs)
             st.success(f"✅ Processed {len(website_docs)} website chunks")
+            logger.info(f"Website processing completed: {len(website_docs)} chunks")
         
         # Process uploaded files
         if "files" in sources:
+            logger.info(f"Processing {len(sources['files'])} uploaded files")
             for uploaded_file in sources["files"]:
                 file_path = f"temp_{uploaded_file.name}"
+                logger.info(f"Processing uploaded file: {uploaded_file.name}")
+                
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 
@@ -360,27 +511,37 @@ class RAGChatbot:
                     pdf_docs = self.doc_processor.process_pdf(file_path)
                     all_documents.extend(pdf_docs)
                     st.success(f"✅ Processed {len(pdf_docs)} PDF chunks")
+                    logger.info(f"PDF processing completed: {len(pdf_docs)} chunks")
                 
                 elif uploaded_file.name.endswith('.docx'):
                     st.info(f"📝 Processing DOCX: {uploaded_file.name}")
                     docx_docs = self.doc_processor.process_docx(file_path)
                     all_documents.extend(docx_docs)
                     st.success(f"✅ Processed {len(docx_docs)} DOCX chunks")
+                    logger.info(f"DOCX processing completed: {len(docx_docs)} chunks")
                 
                 # Clean up temp file
                 os.remove(file_path)
+                logger.debug(f"Cleaned up temporary file: {file_path}")
         
         # Add to Pinecone vector store
         if all_documents:
             st.info("🔍 Creating embeddings with Pinecone and storing in vector database...")
+            logger.info(f"Adding {len(all_documents)} documents to vector store")
             self.vector_store.add_documents(all_documents)
             st.success(f"✅ Successfully loaded {len(all_documents)} document chunks into Pinecone!")
+            logger.info(f"Document loading completed: {len(all_documents)} total chunks")
+        else:
+            logger.warning("No documents to process")
         
         return len(all_documents)
     
     def generate_response(self, query: str, relevant_docs: List[Dict]) -> str:
         """Generate response using OpenRouter API"""
+        logger.info(f"Generating response for query: '{query[:50]}...' with {len(relevant_docs)} relevant docs")
+        
         if not relevant_docs:
+            logger.info("No relevant documents found, returning default response")
             return "I don't know. I couldn't find relevant information in the support documentation to answer your question."
         
         # Prepare context from relevant documents
@@ -388,6 +549,8 @@ class RAGChatbot:
             f"Source: {doc['title']}\nContent: {doc['content']}"
             for doc in relevant_docs
         ])
+        
+        logger.debug(f"Context length: {len(context)} characters")
         
         system_prompt = """You are a helpful customer support assistant. You can ONLY answer questions based on the provided support documentation context. 
 
@@ -408,6 +571,7 @@ Context from support documentation:
         ]
         
         try:
+            logger.debug(f"Sending request to OpenRouter API with model: {self.model}")
             headers = {
                 "Authorization": f"Bearer {self.openrouter_api_key}",
                 "Content-Type": "application/json"
@@ -421,34 +585,43 @@ Context from support documentation:
             }
             
             response = requests.post(self.base_url, headers=headers, json=data)
+            logger.debug(f"OpenRouter API response status: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
-                return result["choices"][0]["message"]["content"]
+                generated_response = result["choices"][0]["message"]["content"]
+                logger.info(f"Successfully generated response: {len(generated_response)} characters")
+                return generated_response
             else:
                 logger.error(f"API Error: {response.status_code} - {response.text}")
                 return "I apologize, but I'm experiencing technical difficulties. Please try again later."
                 
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
+            logger.error(f"Error generating response: {e}", exc_info=True)
             return "I apologize, but I'm experiencing technical difficulties. Please try again later."
     
     def chat(self, query: str) -> Dict[str, Any]:
         """Main chat function"""
+        logger.info(f"Processing chat query: '{query[:50]}...'")
+        
         # Search for relevant documents in Pinecone
         relevant_docs = self.vector_store.search(query, limit=5)
         
         # Generate response
         response = self.generate_response(query, relevant_docs)
         
-        return {
+        result = {
             "response": response,
             "sources": relevant_docs,
             "timestamp": datetime.now().isoformat()
         }
+        
+        logger.info(f"Chat processing completed: {len(response)} character response with {len(relevant_docs)} sources")
+        return result
     
     def get_stats(self) -> Dict:
         """Get system statistics"""
+        logger.debug("Fetching system statistics")
         return self.vector_store.get_index_stats()
 
 def main():
