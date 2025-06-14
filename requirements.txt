@@ -1,0 +1,11 @@
+streamlit
+requests
+pinecone
+PyPDF2
+python-docx
+beautifulsoup4
+pandas
+numpy
+lxml
+html5lib
+uuid
