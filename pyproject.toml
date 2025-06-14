@@ -12,7 +12,6 @@ dependencies = [
     "numpy>=2.2.6",
     "pandas>=2.3.0",
     "pinecone>=7.0.2",
-    "pinecone-client>=6.0.0",
     "pypdf2>=3.0.1",
     "python-docx>=1.1.2",
     "requests>=2.32.4",

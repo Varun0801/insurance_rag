@@ -17,12 +17,10 @@ import uuid
 import PyPDF2
 import docx
 from bs4 import BeautifulSoup
-import pandas as pd
 
 # Pinecone and embeddings
 import pinecone
 from pinecone import Pinecone, ServerlessSpec
-import numpy as np
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -688,10 +686,10 @@ def main():
         model = st.selectbox(
             "Select Model",
             [
-                "anthropic/claude-3-haiku",
-                "anthropic/claude-3-sonnet",
-                "openai/gpt-3.5-turbo",
-                "openai/gpt-4o-mini"
+                "meta-llama/llama-3.3-8b-instruct:free",
+                "qwen/qwen3-8b:free",
+                "google/gemma-3-4b-it:free",
+                "mistralai/mistral-small-3.1-24b-instruct:free"
             ]
         )
         
@@ -842,39 +840,51 @@ def main():
             if 'messages' not in st.session_state:
                 st.session_state.messages = []
             
-            # Display chat history
-            for message in st.session_state.messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
+            # Display chat history in a scrollable container
+            chat_container = st.container()
+            with chat_container:
+                if st.session_state.messages:
+                    for message in st.session_state.messages:
+                        with st.chat_message(message["role"]):
+                            st.markdown(message["content"])
+                            
+                            # Show sources for assistant messages
+                            if message["role"] == "assistant" and "sources" in message:
+                                sources = message["sources"]
+                                if sources and not message["content"].startswith("I don't know"):
+                                    with st.expander("📚 Sources", expanded=False):
+                                        for i, source in enumerate(sources[:3]):
+                                            st.markdown(f"**Source {i+1}:** {source['title']}")
+                                            st.markdown(f"*Similarity: {source['score']:.3f}*")
+                                            st.markdown(f"*Type: {source['metadata']['type']}*")
+                                            st.markdown(f"```\n{source['content'][:200]}...\n```")
+                                            st.markdown("---")
+                else:
+                    st.markdown("*Start a conversation by asking a question below...*")
             
-            # Chat input
-            if prompt := st.chat_input("Ask me anything about the support documentation..."):
+            # Chat input - always at the bottom
+            prompt = st.chat_input("Ask me anything about the support documentation...")
+            
+            # Handle new message
+            if prompt:
                 # Add user message to chat history
                 st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
                 
-                # Generate and display assistant response
-                with st.chat_message("assistant"):
-                    with st.spinner("Searching Pinecone and generating response..."):
-                        chat_result = st.session_state.chatbot.chat(prompt)
-                        response = chat_result["response"]
-                        sources = chat_result["sources"]
-                    
-                    st.markdown(response)
-                    
-                    # Show sources if available
-                    if sources and not response.startswith("I don't know"):
-                        with st.expander("📚 Sources", expanded=False):
-                            for i, source in enumerate(sources[:3]):
-                                st.markdown(f"**Source {i+1}:** {source['title']}")
-                                st.markdown(f"*Similarity: {source['score']:.3f}*")
-                                st.markdown(f"*Type: {source['metadata']['type']}*")
-                                st.markdown(f"```\n{source['content'][:200]}...\n```")
-                                st.markdown("---")
+                # Generate assistant response
+                with st.spinner("Searching Pinecone and generating response..."):
+                    chat_result = st.session_state.chatbot.chat(prompt)
+                    response = chat_result["response"]
+                    sources = chat_result["sources"]
                 
-                # Add assistant response to chat history
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                # Add assistant response to chat history with sources
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": response,
+                    "sources": sources
+                })
+                
+                # Rerun to refresh the display
+                st.rerun()
     
     with col2:
         st.header("📊 System Info")
@@ -930,17 +940,6 @@ def main():
                         st.rerun()
                 except Exception as e:
                     st.error(f"Error clearing index: {e}")
-        
-        st.markdown("---")
-        st.header("🌲 Pinecone Features")
-        st.markdown("""
-        - ✅ **Serverless Architecture**
-        - ✅ **Pinecone Embeddings** (multilingual-e5-large)
-        - ✅ **Auto-scaling**
-        - ✅ **High Performance**
-        - ✅ **Real-time Updates**
-        - ✅ **Metadata Filtering**
-        """)
         
         st.markdown("---")
         st.header("ℹ️ How it works")
