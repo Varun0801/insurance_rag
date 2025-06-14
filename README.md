@@ -27,13 +27,13 @@ This project implements an advanced **Retrieval-Augmented Generation (RAG)** cha
 │ • DOCX Files    │    │ • Metadata       │    │   Search        │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                                                         │
-┌─────────────────┐    ┌──────────────────┐           │
+┌─────────────────┐    ┌──────────────────┐             │
 │   User Query    │───▶│   RAG Pipeline   │◀──────────┘
 │                 │    │                  │
 │ • Natural       │    │ • Query          │    ┌─────────────────┐
 │   Language      │    │   Embedding      │───▶│   LLM Response  │
 │ • Chat          │    │ • Context        │    │                 │
-│   Interface     │    │   Retrieval      │    │ • Claude/GPT    │
+│   Interface     │    │   Retrieval      │    │ • Latest LLM    │
 └─────────────────┘    └──────────────────┘    │ • Contextual    │
                                                │ • Source Cited  │
                                                └─────────────────┘
