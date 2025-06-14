@@ -1,29 +1,33 @@
-FROM python:3.9-slim
+# Use the official Python image
+FROM python:3.10-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (minimal for Railway)
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y ffmpeg libsndfile1 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy app files
+COPY . /app
 
-# Copy application files
-COPY . .
+# Install Python dependencies
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
 
-# Railway uses PORT environment variable
-ENV PORT=8501
+# Expose the Streamlit port
+EXPOSE 7860
 
-# Expose the port (Railway will override this)
-EXPOSE $PORT
+# Streamlit configuration for public sharing
+ENV STREAMLIT_SERVER_PORT=7860
+ENV STREAMLIT_SERVER_ENABLECORS=false
+ENV STREAMLIT_SERVER_ENABLEXsrfProtection=false
+ENV STREAMLIT_SERVER_HEADLESS=true
 
-# Health check for Railway
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:$PORT/_stcore/health || exit 1
-
-# Start the application
-CMD streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false
+# Command to run the app
+CMD ["streamlit", "run", "app.py"]
